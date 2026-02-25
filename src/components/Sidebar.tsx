@@ -1,0 +1,282 @@
+"use client"
+import { formatActivityStatus } from '../utils/formatActivityStatus'
+import { useQuery, useMutation } from 'convex/react'
+import { useState, useEffect } from 'react'
+import { useGlobalTypingIndicators } from './useGlobalTypingIndicators'
+import { api } from '../../convex/_generated/api'
+import Image from 'next/image'
+import { Search, Users, MessageCircle } from 'lucide-react'
+import { useTheme } from './ThemeProvider'
+
+interface SidebarProps {
+  currentUserId: string
+  onSelectConversation: (id: string) => void
+  onClose?: () => void
+}
+
+export function Sidebar({ currentUserId, onSelectConversation, onClose }: SidebarProps) {
+  const { isDark } = useTheme()
+  const users = useQuery(api.users.getUsers)
+  const conversations = useQuery(api.conversations.getConversations, { userId: currentUserId as any })
+  const createConversation = useMutation(api.conversations.createConversation)
+  const markAsRead = useMutation(api.conversations.markAsRead)
+  const typingByConversation = useGlobalTypingIndicators(currentUserId)
+  const [search, setSearch] = useState('')
+  const [activeTab, setActiveTab] = useState<'users' | 'conversations'>('users')
+
+  // compute unread messages across all conversations for badge
+  const totalUnread = conversations?.reduce((sum, c) => sum + (c.unreadCount || 0), 0) || 0
+  const [creatingGroup, setCreatingGroup] = useState(false)
+  const [selectedUsers, setSelectedUsers] = useState<string[]>([])
+  const [groupName, setGroupName] = useState('')
+
+  const [, setRefreshKey] = useState(0)
+
+  // Refresh activity status every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setRefreshKey(prev => prev + 1)
+    }, 30000) // 30 seconds
+
+    return () => clearInterval(interval)
+  }, [])
+
+  const filteredUsers = users?.filter(u => u._id !== currentUserId && u.name.toLowerCase().includes(search.toLowerCase()))
+
+  const handleUserClick = async (userId: string) => {
+    if (creatingGroup) {
+      if (selectedUsers.includes(userId)) {
+        setSelectedUsers(selectedUsers.filter(id => id !== userId))
+      } else {
+        setSelectedUsers([...selectedUsers, userId])
+      }
+    } else {
+      const convId = await createConversation({
+        participants: [currentUserId as any, userId as any],
+        isGroup: false,
+      })
+      onSelectConversation(convId)
+    }
+  }
+
+  const handleCreateGroup = async () => {
+    if (selectedUsers.length > 0 && groupName.trim()) {
+      const convId = await createConversation({
+        participants: [currentUserId as any, ...selectedUsers as any],
+        isGroup: true,
+        name: groupName.trim(),
+      })
+      onSelectConversation(convId)
+      setCreatingGroup(false)
+      setSelectedUsers([])
+      setGroupName('')
+    }
+  }
+
+  return (
+    <div className={`w-80 border-r flex flex-col ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+      {onClose && (
+        <div className="p-2 border-b flex items-center justify-between">
+          <button onClick={onClose} className="text-sm px-2 py-1 rounded bg-gray-200 dark:bg-gray-700">Close</button>
+        </div>
+      )}
+      <div className={`p-4 border-b ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
+        <div className="flex space-x-1 mb-4">
+          <button
+            onClick={() => setActiveTab('users')}
+            className={`flex-1 flex items-center justify-center p-2 rounded-md text-sm font-medium ${
+              activeTab === 'users' 
+                ? isDark ? 'bg-blue-900 text-blue-300' : 'bg-blue-100 text-blue-700'
+                : `${isDark ? 'text-gray-400 hover:text-gray-200' : 'text-gray-500 hover:text-gray-700'}`
+            }`}
+          >
+            <Users className="w-4 h-4 mr-2" />
+            Users
+          </button>
+          <button
+            onClick={() => setActiveTab('conversations')}
+            className={`flex-1 flex items-center justify-center p-2 rounded-md text-sm font-medium ${
+              activeTab === 'conversations' 
+                ? isDark ? 'bg-blue-900 text-blue-300' : 'bg-blue-100 text-blue-700'
+                : `${isDark ? 'text-gray-400 hover:text-gray-200' : 'text-gray-500 hover:text-gray-700'}`
+            }`}
+          >
+            <MessageCircle className="w-4 h-4 mr-2" />
+            <span className="relative">Chats
+              {totalUnread > 0 && activeTab !== 'conversations' && (
+                <span className="absolute -top-2 -right-6 inline-flex items-center justify-center px-2 py-0.5 text-xs font-bold leading-none text-white bg-red-500 rounded-full">
+                  {totalUnread}
+                </span>
+              )}
+            </span>
+          </button>
+        </div>
+        {activeTab === 'users' && (
+          <div className="relative">
+            <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 ${isDark ? 'text-gray-500' : 'text-gray-400'}`} />
+            <input
+              type="text"
+              placeholder="Search users..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className={`w-full pl-10 pr-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'}`}
+            />
+          </div>
+        )}
+        {activeTab === 'users' && !creatingGroup && (
+          <button
+            onClick={() => setCreatingGroup(true)}
+            className="w-full mt-2 p-2 bg-green-500 text-white rounded-md hover:bg-green-600"
+          >
+            New Group
+          </button>
+        )}
+        {creatingGroup && (
+          <div className="mt-2">
+            <input
+              type="text"
+              placeholder="Group name"
+              value={groupName}
+              onChange={(e) => setGroupName(e.target.value)}
+              className={`w-full p-2 border rounded-md mb-2 ${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300'}`}
+            />
+            <button
+              onClick={handleCreateGroup}
+              disabled={selectedUsers.length === 0 || !groupName.trim()}
+              className="w-full p-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:bg-gray-300"
+            >
+              Create Group ({selectedUsers.length})
+            </button>
+            <button
+              onClick={() => { setCreatingGroup(false); setSelectedUsers([]); setGroupName(''); }}
+              className={`w-full mt-1 p-2 text-white rounded-md ${isDark ? 'bg-gray-600 hover:bg-gray-500' : 'bg-gray-500 hover:bg-gray-600'}`}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+      </div>
+      <div className={`flex-1 overflow-y-auto ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
+        {activeTab === 'users' ? (
+          <>
+            {filteredUsers?.length ? (
+              filteredUsers.map(u => (
+                <div
+                  key={u._id}
+                  className={`p-3 border-b ${isDark ? 'border-gray-700 hover:bg-gray-700' : 'border-gray-100 hover:bg-gray-50'} cursor-pointer flex items-center`}
+                  onClick={() => handleUserClick(u._id)}
+                >
+                  {creatingGroup && (
+                    <input
+                      type="checkbox"
+                      checked={selectedUsers.includes(u._id)}
+                      onChange={() => {}}
+                      className="mr-2"
+                    />
+                  )}
+                  <div className="relative">
+                    <Image
+                      src={u.imageUrl || '/default-avatar.png'}
+                      alt={u.name}
+                      width={40}
+                      height={40}
+                      className="rounded-full"
+                    />
+                    {u.isOnline && (
+                      <div className={`absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 ${isDark ? 'border-gray-900' : 'border-white'} rounded-full`} />
+                    )}
+                  </div>
+                  <div className="ml-3">
+                    <p className={`font-medium ${isDark ? 'text-gray-100' : 'text-gray-900'}`}>{u.name}</p>
+                      <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{formatActivityStatus(u.isOnline || false, u.lastSeen || 0)}</p>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className={`p-4 text-center ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                <Users className={`w-12 h-12 mx-auto mb-2 ${isDark ? 'text-gray-600' : 'text-gray-300'}`} />
+                No users found
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            {conversations?.length ? (
+              conversations.map(c => {
+                const typingUsers = (typingByConversation[c._id] || []).filter(u => u._id !== currentUserId)
+                const isTyping = typingUsers.length > 0
+
+                return (
+                  <div
+                    key={c._id}
+                    className={`p-3 border-b ${isDark ? 'border-gray-700 hover:bg-gray-700' : 'border-gray-100 hover:bg-gray-50'} cursor-pointer flex items-center`}
+                    onClick={() => onSelectConversation(c._id)}
+                  >
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center mr-3 flex-shrink-0 ${isDark ? 'bg-blue-900' : 'bg-blue-100'}`}>
+                      <MessageCircle className={`w-5 h-5 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      {c.isGroup ? (
+                        <>
+                          <p className={`font-medium truncate ${isDark ? 'text-gray-100' : 'text-gray-900'}`}>{c.name || 'Group Chat'}</p>
+                          {isTyping ? (
+                            <div className="flex items-center gap-1">
+                              <span className="text-green-500 text-xs font-medium truncate">
+                                {typingUsers.map(u => u.name).join(', ')} typing
+                              </span>
+                              <span className="typing-dot text-green-500 text-xs">•</span>
+                              <span className="typing-dot text-green-500 text-xs">•</span>
+                              <span className="typing-dot text-green-500 text-xs">•</span>
+                            </div>
+                          ) : (
+                            <p className={`text-sm truncate ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                              {c.participants.length} members
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        (() => {
+                          const otherUserId = c.participants.find(p => p !== currentUserId)
+                          const otherUser = users?.find(u => u._id === otherUserId)
+                          return (
+                            <>
+                              <p className={`font-medium truncate ${isDark ? 'text-gray-100' : 'text-gray-900'}`}>{otherUser?.name || 'Unknown User'}</p>
+                              {isTyping ? (
+                                <div className="flex items-center gap-1">
+                                  <span className="text-green-500 text-xs font-medium">typing</span>
+                                  <span className="typing-dot text-green-500 text-xs">•</span>
+                                  <span className="typing-dot text-green-500 text-xs">•</span>
+                                  <span className="typing-dot text-green-500 text-xs">•</span>
+                                </div>
+                              ) : (
+                                <p className={`text-sm truncate ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                                  {c.lastMessageContent
+                                    ? c.lastMessageContent.substring(0, 30) + (c.lastMessageContent.length > 30 ? '...' : '')
+                                    : 'No messages yet'}
+                                </p>
+                              )}
+                            </>
+                          )
+                        })()
+                      )}
+                    </div>
+                    {c.unreadCount > 0 && (
+                      <div className="bg-red-500 text-white text-xs rounded-full px-2 py-1 ml-2 flex-shrink-0">
+                        {c.unreadCount}
+                      </div>
+                    )}
+                  </div>
+                )
+              })
+            ) : (
+              <div className={`p-4 text-center ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                <MessageCircle className={`w-12 h-12 mx-auto mb-2 ${isDark ? 'text-gray-600' : 'text-gray-300'}`} />
+                No conversations yet
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}

@@ -1,0 +1,18 @@
+'use client'
+
+import { ClerkProvider } from '@clerk/nextjs'
+import { ConvexProvider, ConvexReactClient } from 'convex/react'
+
+const convex = new ConvexReactClient(process.env.NEXT_PUBLIC_CONVEX_URL!)
+
+import { ThemeProvider } from './ThemeProvider'
+
+export function Providers({ children }: { children: React.ReactNode }) {
+  return (
+    <ClerkProvider>
+      <ConvexProvider client={convex}>
+        <ThemeProvider>{children}</ThemeProvider>
+      </ConvexProvider>
+    </ClerkProvider>
+  )
+}
